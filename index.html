@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="apple-mobile-web-app-title" content="Run Journal">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Run Journal</title>
+<style>
+  :root { --bg:#fafaf8; --fg:#1c1c1a; --muted:#6b6b66; --card:#fff; --line:#e3e3de; --accent:#fc4c02; --accent-fg:#fff; --err:#b3261e; --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#141413; --fg:#ececea; --muted:#9a9a94; --card:#1e1e1c; --line:#33332f; --err:#ff8a80; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font: 16px/1.45 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 16px 16px 48px; }
+  header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom: 8px; }
+  h1 { font-size: 1.35rem; margin: 0; }
+  h2 { font-size: 1.05rem; margin: 0 0 10px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-top:12px; }
+  button { font: inherit; border:0; border-radius:8px; padding:10px 14px; background:var(--accent); color:var(--accent-fg); cursor:pointer; }
+  button.secondary { background:transparent; color:var(--fg); border:1px solid var(--line); }
+  button:disabled { opacity:.5; cursor:default; }
+  label { display:block; margin: 10px 0 4px; font-weight:600; font-size:.92rem; }
+  input[type=text], input[type=password] { width:100%; font: inherit; padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); }
+  .note { color:var(--muted); font-size:.88rem; margin: 8px 0 0; }
+  #status { min-height: 1.4em; margin: 6px 0 0; color: var(--muted); font-size:.92rem; }
+  #status.error { color: var(--err); }
+  ol { padding-left: 20px; margin: 0 0 8px; }
+  ol li { margin: 4px 0; }
+  code { font-family: var(--mono); font-size:.9em; background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom: 10px; }
+  .row .spacer { flex:1; }
+  #activityList { display:flex; flex-direction:column; gap:6px; margin: 10px 0; }
+  button.act { display:flex; flex-direction:column; align-items:flex-start; gap:2px; width:100%; text-align:left; background:var(--bg); color:var(--fg); border:1px solid var(--line); }
+  button.act span { color:var(--muted); font-size:.85rem; }
+  textarea#output { width:100%; min-height: 320px; resize: vertical; font-family: var(--mono); font-size: .86rem; line-height:1.45; padding:12px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .warn { color: var(--err); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Run Journal</h1>
+    <button id="settingsBtn" class="secondary">Settings</button>
+  </header>
+  <p id="status"></p>
+
+  <section id="setup" hidden>
+    <h2>Connect to Strava</h2>
+    <p id="fileWarning" class="warn" hidden>This page is open as a local file. Strava can only redirect back to a web address, so host it (see README) or serve it locally first.</p>
+    <ol>
+      <li>Go to <a href="https://www.strava.com/settings/api" target="_blank" rel="noopener">strava.com/settings/api</a> and create an application (any name; category "Data Importer").</li>
+      <li>Set <b>Authorization Callback Domain</b> to: <code id="callbackDomain"></code></li>
+      <li>Copy the <b>Client ID</b> and <b>Client Secret</b> into the boxes below.</li>
+    </ol>
+    <label for="clientId">Client ID</label>
+    <input id="clientId" type="text" inputmode="numeric" autocomplete="off">
+    <label for="clientSecret">Client Secret</label>
+    <input id="clientSecret" type="password" autocomplete="off">
+    <p class="note">Both are kept only in this browser's local storage and are sent only to strava.com. You will enter them once per device.</p>
+    <div class="row" style="margin-top:12px">
+      <button id="saveBtn">Save &amp; connect to Strava</button>
+      <button id="disconnectBtn" class="secondary" hidden>Disconnect</button>
+    </div>
+  </section>
+
+  <section id="activityPanel" hidden>
+    <h2>Recent runs</h2>
+    <label style="font-weight:400"><input type="checkbox" id="allTypes"> show all activity types</label>
+    <div id="activityList"></div>
+    <button id="moreBtn" class="secondary">Load more</button>
+  </section>
+
+  <section id="outputPanel" hidden>
+    <div class="row">
+      <button id="backBtn" class="secondary">← Runs</button>
+      <span class="spacer"></span>
+      <button id="shareBtn" class="secondary" hidden>Share</button>
+      <button id="copyBtn">Copy</button>
+    </div>
+    <h2 id="outputTitle"></h2>
+    <textarea id="output" spellcheck="false"></textarea>
+    <p class="note">Edit anything before copying (for example fill in RPE if it was not recorded in Strava).</p>
+  </section>
+</main>
+<script src="journal.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
