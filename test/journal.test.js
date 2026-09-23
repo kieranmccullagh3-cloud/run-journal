@@ -160,3 +160,45 @@ test('format produces the full journal entry', () => {
   const bare = J.format({ name: 'Manual run', start_date_local: '2026-09-01T07:00:00Z', distance: 5000, moving_time: 1500 }, { splits: [] }, null, null);
   assert.match(bare, /Calories: n\/a/); assert.match(bare, /RPE: __\/10/); assert.match(bare, /\(no split data for this activity\)/);
 });
+
+test('buildLaps computes lap stats from streams with Strava distance/time', () => {
+  const s = syntheticStreams(1200);
+  const laps = [
+    { lap_index: 1, start_index: 0, end_index: 180, distance: 576, elapsed_time: 180, moving_time: 180, average_heartrate: 999 },
+    { lap_index: 2, start_index: 180, end_index: 300, distance: 384, elapsed_time: 120, moving_time: 120 },
+    { lap_index: 3, start_index: 300, end_index: 1199, distance: 2877, elapsed_time: 899, moving_time: 899 },
+  ];
+  const r = J.buildLaps(laps, s, {});
+  assert.equal(r.length, 3);
+  assert.equal(r[0].n, 1);
+  assert.ok(Math.abs(r[0].km - 0.576) < 1e-9);
+  assert.equal(r[0].elapsed, 180);
+  assert.ok(Math.abs(r[0].paceSecPerKm - 180 / 0.576) < 1e-9);
+  assert.equal(Math.round(r[0].avgHr), 140, 'HR from streams, not the lap record');
+  assert.equal(r[0].spm, 170);
+  assert.ok(isFinite(r[0].gain) && isFinite(r[0].loss));
+  assert.equal(Math.round(r[2].maxHr), 160);
+});
+
+test('buildLaps falls back to lap fields without streams', () => {
+  const r = J.buildLaps([
+    { lap_index: 1, distance: 800, elapsed_time: 200, moving_time: 195, total_elevation_gain: 3.2, average_heartrate: 158, max_heartrate: 170, average_cadence: 88 },
+  ], null, {});
+  assert.equal(r.length, 1);
+  assert.equal(r[0].gain, 3.2); assert.equal(r[0].loss, null);
+  assert.equal(r[0].avgHr, 158); assert.equal(r[0].maxHr, 170); assert.equal(r[0].spm, 176);
+  assert.ok(Math.abs(r[0].paceSecPerKm - 195 / 0.8) < 1e-9);
+  assert.deepEqual(J.buildLaps(undefined, null, {}), []);
+});
+
+test('formatLap and lap section in format', () => {
+  const zones = [{ min: 0, max: 115 }, { min: 115, max: 152 }, { min: 152, max: 171 }, { min: 171, max: 190 }, { min: 190, max: -1 }];
+  const line = J.formatLap({ n: 3, km: 0.82, elapsed: 180, moving: 180, paceSecPerKm: 180 / 0.82, gain: 1.2, loss: 2.4, avgHr: 165, maxHr: 174, spm: 180 }, zones);
+  assert.equal(line, 'Lap 3: 3:00 (0.82 km), 3:40 /km, +1 m / -2 m, HR 165 (Z3, max 174), 180 spm');
+  assert.equal(J.formatLap({ n: 1, km: 0, elapsed: 120, paceSecPerKm: NaN }, null), 'Lap 1: 2:00');
+  const act = { name: 'Fartlek', start_date_local: '2026-09-23T18:00:00Z', distance: 5000, moving_time: 1500 };
+  const two = J.format(act, { splits: [] }, null, null, [{ n: 1, km: 1, elapsed: 300 }, { n: 2, km: 1, elapsed: 290 }]);
+  assert.match(two, /\nLaps \(as recorded on watch\):\nLap 1: 5:00 \(1\.00 km\)\nLap 2: 4:50 \(1\.00 km\)$/);
+  const one = J.format(act, { splits: [] }, null, null, [{ n: 1, km: 5, elapsed: 1500 }]);
+  assert.ok(!one.includes('Laps ('), 'a single lap is not listed');
+});

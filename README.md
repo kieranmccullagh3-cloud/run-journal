@@ -23,8 +23,16 @@ Splits (per km):
 km 1: 5:20 /km, +12 m / -5 m, HR 145 (Z2), 168 spm
 km 2: 5:10 /km, +3 m / -14 m, HR 151 (Z2), 172 spm
 ...
-last 0.42 km: 4:58 /km, +0 m / -2 m, HR 163 (Z3), 176 spm
+last 0.42 km: 4:58 /km, 0 m / -2 m, HR 163 (Z3), 176 spm
+Laps (as recorded on watch):
+Lap 1: 10:00 (1.92 km), 5:12 /km, +8 m / -6 m, HR 141 (Z2, max 150), 168 spm
+Lap 2: 3:00 (0.82 km), 3:40 /km, +1 m / -2 m, HR 165 (Z3, max 174), 180 spm
+Lap 3: 2:00 (0.34 km), 5:53 /km, 0 m / -1 m, HR 148 (Z2, max 166), 164 spm
+...
 ```
+
+The "Laps" section lists every lap your watch recorded (lap button or auto-lap), so interval and
+fartlek sessions show each effort on its own. It is left out when the run has only one lap.
 
 ## Files
 
@@ -87,6 +95,7 @@ it feel like an app.
 | Elevation gain | Strava's official total |
 | Elevation loss and per-km gain/loss | Computed from Strava's altitude stream (2 m hysteresis), scaled so per-km gains add up to Strava's official total |
 | Per-km pace, moving time, avg HR, cadence | Computed from Strava's streams using Strava's own "moving" flags. Cadence is doubled to steps/min the way the Strava UI does |
+| Laps | Strava's lap records for the activity (distance, time); elevation, HR and cadence for each lap are computed from the streams over that lap's samples |
 | HR zones | Your zones from Strava (Settings → My Performance); falls back to no zone label |
 | Conditions | Open-Meteo (free, no key) hourly data at the run's start location, averaged over the hours the run overlapped: temperature, feels-like, cloud cover, humidity, wind speed/direction/gusts, rain |
 

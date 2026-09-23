@@ -152,9 +152,11 @@
         hrZones(),
         fetchWeather(summary),
       ]);
-      let split = Journal.buildSplits(streams, { officialGain: detail.total_elevation_gain });
+      const elevOpts = { officialGain: detail.total_elevation_gain };
+      let split = Journal.buildSplits(streams, elevOpts);
       if (!split.splits.length) split = Journal.splitsFromStravaMetric(detail.splits_metric);
-      const text = Journal.format(detail, split, weather, zones);
+      const laps = Journal.buildLaps(detail.laps, streams, elevOpts);
+      const text = Journal.format(detail, split, weather, zones, laps);
       showOutput(detail, text);
       const notes = [];
       if (!streams) notes.push('no GPS/sensor streams (per-km elevation and cadence unavailable)');
@@ -228,7 +230,13 @@
     const zones = [{ min: 0, max: 115 }, { min: 115, max: 152 }, { min: 152, max: 171 }, { min: 171, max: 190 }, { min: 190, max: -1 }];
     const weather = { temp: 11.2, feels: 9.1, humidity: 78, cloud: 42, wind: 13, gust: 24, windDir: 225, precip: 0, code: 2 };
     const split = Journal.buildSplits(streams, {});
-    showOutput(act, Journal.format(act, split, weather, zones));
+    const laps = [];
+    for (let i0 = 0, k = 0; i0 < n - 1; k++) {
+      const i1 = Math.min(i0 + (k % 2 === 0 ? 180 : 120), n - 1);
+      laps.push({ lap_index: k + 1, start_index: i0, end_index: i1, distance: dist[i1] - dist[i0], elapsed_time: time[i1] - time[i0], moving_time: time[i1] - time[i0] });
+      i0 = i1;
+    }
+    showOutput(act, Journal.format(act, split, weather, zones, Journal.buildLaps(laps, streams, {})));
     ui.backBtn.hidden = true;
     setStatus('Demo mode: synthetic data. Remove ?demo=1 from the address to use Strava.');
   }

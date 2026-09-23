@@ -95,19 +95,55 @@
 
   /* streams: Strava /activities/{id}/streams?key_by_type=true
      -> { time:{data}, distance:{data}, altitude:{data}, heartrate:{data}, cadence:{data}, moving:{data} }
-     opts.officialGain: Strava's total_elevation_gain; per-split gain/loss are scaled so they add up to it. */
-  function buildSplits(streams, opts) {
+     Returns a context for segmentStats, or null when the essential streams are missing.
+     opts.officialGain: Strava's total_elevation_gain; gain/loss are scaled so segments add up to it. */
+  function prepareStreams(streams, opts) {
     opts = opts || {};
-    const splitM = opts.splitMeters || 1000;
     const S = k => (streams && streams[k] && Array.isArray(streams[k].data)) ? streams[k].data : null;
     const dist = S('distance'), time = S('time');
-    const empty = { splits: [], gain: null, loss: null, factor: 1 };
-    if (!dist || !time || dist.length < 2 || time.length !== dist.length) return empty;
-    const alt = S('altitude'), hr = S('heartrate'), cad = S('cadence'), mov = S('moving');
+    if (!dist || !time || dist.length < 2 || time.length !== dist.length) return null;
     const n = dist.length;
+    const alt = S('altitude');
     const elev = alt && alt.length === n ? elevationIncrements(alt, opts.elevationThreshold) : null;
     let factor = 1;
     if (elev && isNum(opts.officialGain) && opts.officialGain > 0 && elev.gain > 0) factor = opts.officialGain / elev.gain;
+    return { n, dist, time, hr: S('heartrate'), cad: S('cadence'), mov: S('moving'), elev, factor };
+  }
+
+  // Stats for the samples i0..i1 (inclusive) of a prepared stream context.
+  function segmentStats(ctx, i0, i1) {
+    const { dist, time, hr, cad, mov, elev, factor } = ctx;
+    const d = dist[i1] - dist[i0];
+    const elapsed = time[i1] - time[i0];
+    let moving = 0, gain = 0, loss = 0;
+    const hrs = [], cads = [];
+    for (let j = i0 + 1; j <= i1; j++) {
+      const dt = time[j] - time[j - 1];
+      if (!mov || mov[j] !== false) moving += dt;
+      if (elev) { gain += elev.gainAt[j]; loss += elev.lossAt[j]; }
+      if (hr) hrs.push(hr[j]);
+      if (cad) cads.push(cad[j]);
+    }
+    if (moving <= 0) moving = elapsed;
+    const validHr = hrs.filter(x => isNum(x) && x > 0);
+    return {
+      km: d / 1000, elapsed, moving,
+      paceSecPerKm: d > 0 ? moving / (d / 1000) : NaN,
+      gain: elev ? gain * factor : null,
+      loss: elev ? loss * factor : null,
+      avgHr: hr ? mean(hrs) : null,
+      maxHr: validHr.length ? Math.max.apply(null, validHr) : null,
+      spm: toSpm(cad ? mean(cads) : null),
+    };
+  }
+
+  // Per-km splits computed from the streams.
+  function buildSplits(streams, opts) {
+    opts = opts || {};
+    const splitM = opts.splitMeters || 1000;
+    const ctx = prepareStreams(streams, opts);
+    if (!ctx) return { splits: [], gain: null, loss: null, factor: 1 };
+    const { n, dist, elev, factor } = ctx;
 
     // split boundary indices: first sample at or past each k*splitM, then the final sample
     const idx = [0];
@@ -122,31 +158,37 @@
       const i0 = idx[s], i1 = idx[s + 1];
       const d = dist[i1] - dist[i0];
       if (d < 20) continue; // ignore a trailing stub of a few metres
-      const elapsed = time[i1] - time[i0];
-      let moving = 0, gain = 0, loss = 0;
-      const hrs = [], cads = [];
-      for (let j = i0 + 1; j <= i1; j++) {
-        const dt = time[j] - time[j - 1];
-        if (!mov || mov[j] !== false) moving += dt;
-        if (elev) { gain += elev.gainAt[j]; loss += elev.lossAt[j]; }
-        if (hr) hrs.push(hr[j]);
-        if (cad) cads.push(cad[j]);
-      }
-      if (moving <= 0) moving = elapsed;
-      const avgCad = cad ? mean(cads) : null;
-      splits.push({
-        n: s + 1,
-        km: d / 1000,
-        partial: d < splitM * 0.98,
-        elapsed, moving,
-        paceSecPerKm: moving / (d / 1000),
-        gain: elev ? gain * factor : null,
-        loss: elev ? loss * factor : null,
-        avgHr: hr ? mean(hrs) : null,
-        spm: toSpm(avgCad),
-      });
+      const st = segmentStats(ctx, i0, i1);
+      splits.push(Object.assign({ n: s + 1, partial: d < splitM * 0.98 }, st));
     }
     return { splits, gain: elev ? elev.gain * factor : null, loss: elev ? elev.loss * factor : null, factor };
+  }
+
+  /* laps: Strava DetailedActivity.laps (each lap records the watch's lap button / auto-lap, with
+     start_index/end_index into the streams). Distance and times come from Strava's lap record;
+     elevation, HR and cadence are computed from the streams when available, else taken from the lap. */
+  function buildLaps(laps, streams, opts) {
+    if (!Array.isArray(laps) || !laps.length) return [];
+    const ctx = prepareStreams(streams, opts);
+    return laps.map((lap, i) => {
+      const km = (lap.distance || 0) / 1000;
+      const elapsed = isNum(lap.elapsed_time) ? lap.elapsed_time : null;
+      const moving = isNum(lap.moving_time) && lap.moving_time > 0 ? lap.moving_time : elapsed;
+      let st = null;
+      const i0 = lap.start_index, i1 = lap.end_index;
+      if (ctx && isNum(i0) && isNum(i1) && i0 >= 0 && i1 > i0 && i1 < ctx.n) st = segmentStats(ctx, i0, i1);
+      return {
+        n: isNum(lap.lap_index) ? lap.lap_index : i + 1,
+        name: lap.name || null,
+        km, elapsed, moving,
+        paceSecPerKm: km > 0 && isNum(moving) ? moving / km : NaN,
+        gain: st ? st.gain : (isNum(lap.total_elevation_gain) ? lap.total_elevation_gain : null),
+        loss: st ? st.loss : null,
+        avgHr: st && isNum(st.avgHr) ? st.avgHr : (isNum(lap.average_heartrate) ? lap.average_heartrate : null),
+        maxHr: st && isNum(st.maxHr) ? st.maxHr : (isNum(lap.max_heartrate) ? lap.max_heartrate : null),
+        spm: st && isNum(st.spm) ? st.spm : toSpm(lap.average_cadence),
+      };
+    });
   }
 
   // Fallback when streams are unavailable: Strava's own splits_metric (no cadence, net elevation only).
@@ -263,9 +305,29 @@
     return `${label}: ${parts.join(', ')}`;
   }
 
+  // "Lap 3: 3:00 (0.82 km), 3:40 /km, +1 m / -2 m, HR 165 (Z4, max 174), 180 spm"
+  function formatLap(l, zones) {
+    const parts = [];
+    let head = '';
+    if (isNum(l.elapsed)) head = fmtDuration(l.elapsed);
+    if (l.km > 0) head += head ? ` (${l.km.toFixed(2)} km)` : `${l.km.toFixed(2)} km`;
+    if (head) parts.push(head);
+    if (isNum(l.paceSecPerKm) && l.paceSecPerKm > 0) parts.push(`${fmtPace(l.paceSecPerKm)} /km`);
+    if (isNum(l.gain) || isNum(l.loss)) parts.push(`${metres(l.gain, '+')} / ${metres(l.loss, '-')}`);
+    if (isNum(l.avgHr)) {
+      const z = hrZone(l.avgHr, zones);
+      const extra = [z ? `Z${z}` : null, isNum(l.maxHr) ? `max ${round(l.maxHr)}` : null].filter(Boolean);
+      parts.push(`HR ${round(l.avgHr)}${extra.length ? ` (${extra.join(', ')})` : ''}`);
+    }
+    if (isNum(l.spm)) parts.push(`${round(l.spm)} spm`);
+    return `Lap ${l.n}: ${parts.join(', ') || 'n/a'}`;
+  }
+
   /* activity: Strava DetailedActivity; split: result of buildSplits/splitsFromStravaMetric;
-     weather: result of summarizeWeather (or null); zones: heart_rate.zones array (or null). */
-  function format(activity, split, weather, zones) {
+     weather: result of summarizeWeather (or null); zones: heart_rate.zones array (or null);
+     laps: result of buildLaps (or null). Laps are only listed when there is more than one, since a
+     single lap is just the whole run again. */
+  function format(activity, split, weather, zones, laps) {
     const a = activity || {};
     const start = parseLocal(a.start_date_local) || new Date();
     const km = (a.distance || 0) / 1000;
@@ -295,13 +357,17 @@
     L.push('Splits (per km):');
     if (split && split.splits && split.splits.length) split.splits.forEach(s => L.push(formatSplit(s, zones)));
     else L.push('(no split data for this activity)');
+    if (Array.isArray(laps) && laps.length > 1) {
+      L.push('Laps (as recorded on watch):');
+      laps.forEach(l => L.push(formatLap(l, zones)));
+    }
     return L.join('\n');
   }
 
   return {
     ELEVATION_THRESHOLD_M, RUN_TYPES,
     fmtDuration, fmtPace, parseLocal, ymd, hm, fmtDate, timeOfDay, ianaTimezone,
-    elevationIncrements, hrZone, toSpm, buildSplits, splitsFromStravaMetric,
-    cloudWords, compass, wmoWords, summarizeWeather, conditionsLine, metres, formatSplit, format,
+    elevationIncrements, hrZone, toSpm, prepareStreams, segmentStats, buildSplits, buildLaps, splitsFromStravaMetric,
+    cloudWords, compass, wmoWords, summarizeWeather, conditionsLine, metres, formatSplit, formatLap, format,
   };
 });
