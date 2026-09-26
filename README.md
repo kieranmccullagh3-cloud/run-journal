@@ -99,7 +99,7 @@ it feel like an app.
 | Per-km pace, moving time, avg HR, cadence | Computed from Strava's streams using Strava's own "moving" flags. Cadence is doubled to steps/min the way the Strava UI does |
 | Laps | Strava's lap records for the activity (distance, time); elevation, HR and cadence for each lap are computed from the streams over that lap's samples |
 | HR zones | Your zones from Strava (Settings → My Performance); falls back to no zone label |
-| Conditions | Open-Meteo (free, no key) hourly data at the run's start location, averaged over the hours the run overlapped: temperature, feels-like, cloud cover, humidity, wind speed/direction/gusts, rain |
+| Conditions | Open-Meteo (free, no key) hourly data at the run's start location, averaged over the hours the run overlapped: temperature, feels-like, cloud cover, humidity, wind speed/direction/gusts, rain. Runs older than 5 days use the historical archive, because the forecast API only keeps about 60 days of history; if one source comes back empty the other is tried |
 
 Runs without GPS or streams (treadmill, manual entries) fall back to Strava's own per-km splits,
 which have no cadence and only net elevation; weather is skipped when there is no location.
@@ -223,6 +223,7 @@ tail -n 5 ~/Library/Logs/run-journal-sync.log
 | `AUTH: … Run: node sync/setup.js` | Strava retired the refresh token (for example a newer sign-in elsewhere) or access was revoked | Run `node sync/setup.js` again and choose to reuse the saved Client ID |
 | `PERMISSION: macOS blocked access …` | macOS privacy protection on `~/Documents` blocked the background job | System Settings > Privacy & Security > Files and Folders: allow `node` to access Documents, then kickstart the job |
 | `… left for next run` | Rate limit or the 40-per-run cap during a big backfill | Nothing: the next run continues. Or run by hand again after 15 minutes |
+| Blank weather columns for runs that have a location | Open-Meteo was unreachable during that sync | Re-fetch them: `node sync/strava-sync.js --refresh-days 14` (keep the window small enough to fit one run) |
 | No new log lines at all | The Mac was shut down at both times, or `node` moved (for example after a Node upgrade to a new path) | Kickstart by hand; re-run `./sync/install-schedule.sh` after changing Node |
 | Web app says "sign-in needs renewing" | The sync's refresh retired the browser's token | Press "Save & connect to Strava" once on that device |
 

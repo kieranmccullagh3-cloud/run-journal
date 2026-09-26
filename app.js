@@ -89,12 +89,15 @@
   async function fetchWeather(act) {
     const req = Journal.weatherRequest(act);
     if (!req) return null;
-    try {
-      const r = await fetch(req.url);
-      if (!r.ok) return null;
-      const j = await r.json();
-      return Journal.summarizeWeather(j.hourly, req.start, req.durationSec);
-    } catch (e) { return null; }
+    for (const url of req.urls) {
+      try {
+        const r = await fetch(url);
+        if (!r.ok) continue;
+        const w = Journal.summarizeWeather((await r.json()).hourly, req.start, req.durationSec);
+        if (w) return w;
+      } catch (e) { /* try the next source */ }
+    }
+    return null;
   }
 
   // ---------- activities ----------

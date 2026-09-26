@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* strava-sync.js — fetch Strava activities and upsert them into a CSV (one row per activity).
 
-   Usage:  node sync/strava-sync.js [--csv PATH] [--backfill-days N] [--max N]
+   Usage:  node sync/strava-sync.js [--csv PATH] [--backfill-days N] [--refresh-days N] [--max N]
    Credentials come from ~/.config/run-journal/strava.json, created by `node sync/setup.js`.
    Designed to run unattended (launchd) twice a day; safe to run by hand at any time. */
 'use strict';
@@ -153,12 +153,15 @@ async function syncOnce(opts) {
 async function fetchWeather(fetchImpl, act, now) {
   const req = J.weatherRequest(act, now.getTime());
   if (!req) return null;
-  try {
-    const r = await fetchImpl(req.url);
-    if (!r.ok) return null;
-    const j = await r.json();
-    return J.summarizeWeather(j.hourly, req.start, req.durationSec);
-  } catch (e) { return null; }
+  for (const url of req.urls) {
+    try {
+      const r = await fetchImpl(url);
+      if (!r.ok) continue;
+      const w = J.summarizeWeather((await r.json()).hourly, req.start, req.durationSec);
+      if (w) return w;
+    } catch (e) { /* try the next source */ }
+  }
+  return null;
 }
 
 // ---------- cli ----------
@@ -169,7 +172,8 @@ function parseArgs(argv) {
     if (a === '--csv') { o.csvPath = path.resolve(v.replace(/^~(?=\/)/, os.homedir())); i++; }
     else if (a === '--backfill-days') { o.backfillDays = Number(v); i++; }
     else if (a === '--max') { o.maxPerRun = Number(v); i++; }
-    else if (a === '-h' || a === '--help') { console.log('Usage: node sync/strava-sync.js [--csv PATH] [--backfill-days N] [--max N]'); process.exit(0); }
+    else if (a === '--refresh-days') { o.refreshDays = Number(v); i++; }
+    else if (a === '-h' || a === '--help') { console.log('Usage: node sync/strava-sync.js [--csv PATH] [--backfill-days N] [--refresh-days N] [--max N]\n  --refresh-days N  re-fetch activities from the last N days (default 3), e.g. after a calculation fix.\n                    Keep N small enough that the activities fit in one run (--max, ~2 Strava requests each).'); process.exit(0); }
     else { console.error(`Unknown option: ${a}`); process.exit(2); }
   }
   return o;

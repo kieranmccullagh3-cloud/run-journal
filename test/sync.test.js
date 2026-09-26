@@ -49,7 +49,8 @@ function fakeServer(acts, opts = {}) {
       const hours = Array.from({ length: 48 }, (_, h) => h);
       const d0 = new URL(url).searchParams.get('start_date');
       const time = hours.map(h => { const d = new Date(`${d0}T00:00:00Z`); d.setUTCHours(h); return d.toISOString().slice(0, 13) + ':00'; });
-      return json({ hourly: { time, temperature_2m: hours.map(() => 18), apparent_temperature: hours.map(() => 17), relative_humidity_2m: hours.map(() => 70), cloud_cover: hours.map(() => 50), wind_speed_10m: hours.map(() => 10), wind_gusts_10m: hours.map(() => 20), wind_direction_10m: hours.map(() => 90), precipitation: hours.map(() => 0), weather_code: hours.map(() => 2) } });
+      const v = x => (opts.nullWeatherFor && url.includes(opts.nullWeatherFor) ? null : x);
+      return json({ hourly: { time, temperature_2m: hours.map(() => v(18)), apparent_temperature: hours.map(() => v(17)), relative_humidity_2m: hours.map(() => v(70)), cloud_cover: hours.map(() => v(50)), wind_speed_10m: hours.map(() => v(10)), wind_gusts_10m: hours.map(() => v(20)), wind_direction_10m: hours.map(() => v(90)), precipitation: hours.map(() => v(0)), weather_code: hours.map(() => v(2)) } });
     }
     apiCalls++;
     if (opts.rateLimitAfter && apiCalls > opts.rateLimitAfter) return json({ message: 'Rate Limit Exceeded' }, 429);
@@ -179,4 +180,15 @@ test('a retired refresh token raises AuthError and leaves the CSV untouched', as
 
 test('missing credentials give a clear AuthError', async () => {
   await assert.rejects(syncOnce({ fetch: async () => { throw new Error('should not fetch'); }, credsPath: '/nonexistent/strava.json', csvPath: '/tmp/x.csv', log: quiet }), AuthError);
+});
+
+test('weather falls back to the other Open-Meteo API when the first returns only nulls', async () => {
+  for (const [daysAgo, broken] of [[30, 'archive-api'], [1, 'api.open-meteo.com/v1/forecast']]) {
+    const t = tmpSetup();
+    const srv = fakeServer([activity(601, daysAgo)], { nullWeatherFor: broken });
+    await syncOnce({ fetch: srv.fetch, now: NOW, csvPath: t.csvPath, credsPath: t.credsPath, log: quiet });
+    const row = CSV.parse(fs.readFileSync(t.csvPath, 'utf8'))[0];
+    assert.equal(row.temp_c, '18', `fallback used when ${broken} is empty`);
+    assert.equal(srv.calls.filter(u => u.includes('open-meteo')).length, 2);
+  }
 });

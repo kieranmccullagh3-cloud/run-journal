@@ -202,3 +202,21 @@ test('formatLap and lap section in format', () => {
   const one = J.format(act, { splits: [] }, null, null, [{ n: 1, km: 5, elapsed: 1500 }]);
   assert.ok(!one.includes('Laps ('), 'a single lap is not listed');
 });
+
+test('weatherRequest prefers the archive for older activities, forecast for recent ones', () => {
+  const now = Date.parse('2026-09-26T02:00:00Z');
+  const act = d => ({ start_latlng: [-27.56, 152.83], timezone: '(GMT+10:00) Australia/Brisbane', elapsed_time: 1800,
+    start_date: new Date(now - d * 86400000).toISOString(), start_date_local: '2026-09-20T06:00:00Z' });
+  const old = J.weatherRequest(act(70), now), recent = J.weatherRequest(act(1), now);
+  assert.match(old.urls[0], /^https:\/\/archive-api\.open-meteo\.com/); assert.match(old.urls[1], /^https:\/\/api\.open-meteo\.com\/v1\/forecast/);
+  assert.match(recent.urls[0], /^https:\/\/api\.open-meteo\.com\/v1\/forecast/); assert.match(recent.urls[1], /archive-api/);
+  assert.equal(old.url, old.urls[0]);
+  assert.match(old.urls[0], /timezone=Australia%2FBrisbane/);
+  assert.equal(J.weatherRequest({ start_date_local: '2026-09-20T06:00:00Z' }, now), null, 'no location, no request');
+});
+
+test('summarizeWeather returns null when every value is null', () => {
+  const hourly = { time: ['2026-07-15T06:00', '2026-07-15T07:00'], temperature_2m: [null, null], cloud_cover: [null, null],
+    relative_humidity_2m: [null, null], wind_speed_10m: [null, null], wind_direction_10m: [null, null] };
+  assert.equal(J.summarizeWeather(hourly, J.parseLocal('2026-07-15T06:10:00Z'), 1800), null);
+});

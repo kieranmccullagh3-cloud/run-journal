@@ -238,8 +238,14 @@
 
   const WEATHER_HOURLY = 'temperature_2m,apparent_temperature,relative_humidity_2m,cloud_cover,wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation,weather_code';
 
-  /* Open-Meteo request for the hours an activity covered, or null when it has no start location.
-     The forecast API serves roughly the last 3 months; older dates go to the archive API. */
+  const OPEN_METEO_FORECAST = 'https://api.open-meteo.com/v1/forecast';
+  const OPEN_METEO_ARCHIVE = 'https://archive-api.open-meteo.com/v1/archive';
+  // The forecast API only keeps ~60 days of history (older hours come back as nulls), while the archive
+  // lags real time by ~2 days. So: archive for anything older than this, forecast for recent activities,
+  // and the other API as a fallback when the first returns no values.
+  const ARCHIVE_AFTER_DAYS = 5;
+
+  /* Open-Meteo requests for the hours an activity covered, best source first, or null without a start location. */
   function weatherRequest(act, nowMs) {
     if (!act || !Array.isArray(act.start_latlng) || act.start_latlng.length < 2) return null;
     const start = parseLocal(act.start_date_local);
@@ -247,12 +253,13 @@
     const dur = act.elapsed_time || act.moving_time || 0;
     const end = new Date(start.getTime() + dur * 1000);
     const ageDays = ((isNum(nowMs) ? nowMs : Date.now()) - new Date(act.start_date).getTime()) / 86400000;
-    const base = ageDays > 80 ? 'https://archive-api.open-meteo.com/v1/archive' : 'https://api.open-meteo.com/v1/forecast';
     const q = [
       ['latitude', act.start_latlng[0]], ['longitude', act.start_latlng[1]], ['hourly', WEATHER_HOURLY],
       ['start_date', ymd(start)], ['end_date', ymd(end)], ['timezone', ianaTimezone(act.timezone) || 'auto'],
     ].map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
-    return { url: `${base}?${q}`, start, durationSec: dur };
+    const bases = ageDays > ARCHIVE_AFTER_DAYS ? [OPEN_METEO_ARCHIVE, OPEN_METEO_FORECAST] : [OPEN_METEO_FORECAST, OPEN_METEO_ARCHIVE];
+    const urls = bases.map(b => `${b}?${q}`);
+    return { url: urls[0], urls, start, durationSec: dur };
   }
 
   /* hourly: Open-Meteo "hourly" block ({ time:[...], temperature_2m:[...], ... }) with times in the
@@ -273,6 +280,7 @@
       if (isNum(d)) { sx += Math.cos(d * Math.PI / 180); sy += Math.sin(d * Math.PI / 180); }
     });
     const windDir = (sx || sy) ? ((Math.atan2(sy, sx) * 180 / Math.PI) + 360) % 360 : null;
+    if (!['temperature_2m', 'cloud_cover', 'relative_humidity_2m', 'wind_speed_10m'].some(k => pick(k).length)) return null; // all nulls
     const gusts = pick('wind_gusts_10m'), codes = pick('weather_code'), precip = pick('precipitation');
     return {
       temp: avg('temperature_2m'),
