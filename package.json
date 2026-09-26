@@ -1,0 +1,11 @@
+{
+  "name": "run-journal",
+  "private": true,
+  "description": "Strava run to plain-text journal entry, plus a twice-daily CSV sync",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "sync": "node sync/strava-sync.js",
+    "sync:setup": "node sync/setup.js"
+  },
+  "engines": { "node": ">=18" }
+}

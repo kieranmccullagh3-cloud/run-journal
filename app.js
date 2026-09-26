@@ -44,6 +44,11 @@
   async function tokenRequest(params) {
     const body = new URLSearchParams(Object.assign({ client_id: get(LS.id), client_secret: get(LS.secret) }, params));
     const r = await fetch('https://www.strava.com/oauth/token', { method: 'POST', body });
+    if (!r.ok && params.grant_type === 'refresh_token' && (r.status === 400 || r.status === 401)) {
+      // Strava retires a refresh token once a newer one is issued (for example by the CSV sync on the Mac).
+      set(LS.tokens, null); render();
+      throw new Error('Strava sign-in needs renewing on this device. Press "Save & connect to Strava" (one tap).');
+    }
     if (!r.ok) throw new Error(`Strava token request failed (${r.status}). Check the Client ID / Secret. ${await r.text()}`);
     const j = await r.json();
     set(LS.tokens, JSON.stringify(j));
@@ -82,26 +87,13 @@
 
   // ---------- weather (Open-Meteo, no key) ----------
   async function fetchWeather(act) {
-    if (!Array.isArray(act.start_latlng) || act.start_latlng.length < 2) return null;
-    const [lat, lon] = act.start_latlng;
-    const start = Journal.parseLocal(act.start_date_local);
-    if (!start) return null;
-    const dur = act.elapsed_time || act.moving_time || 0;
-    const end = new Date(start.getTime() + dur * 1000);
-    const tz = Journal.ianaTimezone(act.timezone) || 'auto';
-    const ageDays = (Date.now() - new Date(act.start_date).getTime()) / 86400000;
-    // Forecast API covers roughly the last 3 months; the archive covers everything older (with a few days' lag).
-    const base = ageDays > 80 ? 'https://archive-api.open-meteo.com/v1/archive' : 'https://api.open-meteo.com/v1/forecast';
-    const q = new URLSearchParams({
-      latitude: lat, longitude: lon,
-      hourly: 'temperature_2m,apparent_temperature,relative_humidity_2m,cloud_cover,wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation,weather_code',
-      start_date: Journal.ymd(start), end_date: Journal.ymd(end), timezone: tz,
-    });
+    const req = Journal.weatherRequest(act);
+    if (!req) return null;
     try {
-      const r = await fetch(`${base}?${q}`);
+      const r = await fetch(req.url);
       if (!r.ok) return null;
       const j = await r.json();
-      return Journal.summarizeWeather(j.hourly, start, dur);
+      return Journal.summarizeWeather(j.hourly, req.start, req.durationSec);
     } catch (e) { return null; }
   }
 

@@ -236,6 +236,25 @@
     return null;
   }
 
+  const WEATHER_HOURLY = 'temperature_2m,apparent_temperature,relative_humidity_2m,cloud_cover,wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation,weather_code';
+
+  /* Open-Meteo request for the hours an activity covered, or null when it has no start location.
+     The forecast API serves roughly the last 3 months; older dates go to the archive API. */
+  function weatherRequest(act, nowMs) {
+    if (!act || !Array.isArray(act.start_latlng) || act.start_latlng.length < 2) return null;
+    const start = parseLocal(act.start_date_local);
+    if (!start) return null;
+    const dur = act.elapsed_time || act.moving_time || 0;
+    const end = new Date(start.getTime() + dur * 1000);
+    const ageDays = ((isNum(nowMs) ? nowMs : Date.now()) - new Date(act.start_date).getTime()) / 86400000;
+    const base = ageDays > 80 ? 'https://archive-api.open-meteo.com/v1/archive' : 'https://api.open-meteo.com/v1/forecast';
+    const q = [
+      ['latitude', act.start_latlng[0]], ['longitude', act.start_latlng[1]], ['hourly', WEATHER_HOURLY],
+      ['start_date', ymd(start)], ['end_date', ymd(end)], ['timezone', ianaTimezone(act.timezone) || 'auto'],
+    ].map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+    return { url: `${base}?${q}`, start, durationSec: dur };
+  }
+
   /* hourly: Open-Meteo "hourly" block ({ time:[...], temperature_2m:[...], ... }) with times in the
      activity's local timezone. Averages the hours the run overlapped. */
   function summarizeWeather(hourly, start, durationSec) {
@@ -368,6 +387,6 @@
     ELEVATION_THRESHOLD_M, RUN_TYPES,
     fmtDuration, fmtPace, parseLocal, ymd, hm, fmtDate, timeOfDay, ianaTimezone,
     elevationIncrements, hrZone, toSpm, prepareStreams, segmentStats, buildSplits, buildLaps, splitsFromStravaMetric,
-    cloudWords, compass, wmoWords, summarizeWeather, conditionsLine, metres, formatSplit, formatLap, format,
+    cloudWords, compass, wmoWords, weatherRequest, summarizeWeather, conditionsLine, metres, formatSplit, formatLap, format,
   };
 });

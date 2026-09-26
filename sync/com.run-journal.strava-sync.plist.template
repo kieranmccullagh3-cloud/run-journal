@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.run-journal.strava-sync</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>__REPO__/sync/strava-sync.js</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+  <!-- Twice daily, local time. launchd runs a missed slot once when the Mac wakes. -->
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>15</integer></dict>
+  </array>
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/run-journal-sync.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/run-journal-sync.log</string>
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

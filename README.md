@@ -41,7 +41,9 @@ fartlek sessions show each effort on its own. It is left out when the run has on
 | `index.html` | Page layout and styles |
 | `app.js` | Strava sign-in (OAuth), Strava API calls, Open-Meteo weather, copy/share |
 | `journal.js` | Pure logic: per-km splits, elevation gain/loss, HR zones, weather summary, text formatting |
-| `test/journal.test.js` | Unit tests (`node --test test/`) |
+| `test/journal.test.js` | Unit tests for the journal logic |
+| `sync/` | Mac-only CSV sync: `setup.js` (one-time Strava sign-in), `strava-sync.js` (the sync), `install-schedule.sh` (twice-daily launchd job) |
+| `test/sync.test.js` | Sync tests against a fake Strava and weather server |
 
 ## Setup (once)
 
@@ -121,5 +123,111 @@ which have no cadence and only net elevation; weather is skipped when there is n
 ## Tests
 
 ```bash
-node --test test/
+npm test
+```
+
+## CSV sync (Mac)
+
+A small Node script saves every Strava activity as one row of
+`~/Documents/jarvis-inputs/strava/activities.csv`, twice a day. It reuses the web app's calculations,
+so the numbers match the journal text exactly.
+
+### How it works, and why
+
+* **Incremental.** The first run backfills the last 90 days. Later runs fetch only activities newer than
+  the latest row, plus anything from the last 3 days again, so an RPE or title you add after a run
+  still lands in the CSV. Rows are keyed by Strava activity ID, so re-runs never duplicate.
+* **Every activity type, detail for runs.** All activities get a row (the file is "activities").
+  Streams, per-km splits, laps and cadence are fetched only for runs, which is where they mean
+  something and keeps each sync inside Strava's read limit of 100 requests per 15 minutes.
+* **Rate-limit safe.** At most 40 activities per run (about 2 requests each). If Strava still returns
+  "429 Too Many Requests", the script saves what it has and the next run carries on.
+* **Safe for readers.** The CSV is written to a temporary file and renamed into place, so anything
+  reading it never sees a half-written file.
+* **One line per activity.** Splits and laps sit in the `splits_json` and `laps_json` columns as JSON
+  arrays rather than multi-line text, so line-based tools still work.
+* **Credentials.** Tokens live in `~/.config/run-journal/strava.json`, readable only by your user.
+  Strava issues a new refresh token on refresh and retires the old one, so the file is rewritten
+  after each refresh. A plain file was chosen over the Keychain because an unattended job has to
+  rewrite it regularly, and Keychain prompts can block a background job.
+* **Scheduler.** A user-level launchd job (no sudo) at 09:15 and 21:15 local time. Unlike cron,
+  launchd runs a slot that was missed while the Mac slept as soon as it wakes (see `man launchd.plist`).
+
+### Columns
+
+| Column | Meaning |
+|---|---|
+| `activity_id`, `name`, `sport_type`, `strava_url`, `device_name` | Identity of the activity |
+| `start_local`, `start_utc`, `timezone`, `time_of_day` | When it started (local wall-clock and UTC) |
+| `distance_km`, `moving_time_s`, `elapsed_time_s`, `moving_time` | Distance and duration |
+| `avg_pace_min_per_km`, `avg_pace_s_per_km` | Average moving pace (runs only) |
+| `elevation_gain_m`, `elevation_loss_m` | Strava's gain; loss computed from the altitude stream (runs) |
+| `calories_kcal`, `avg_hr_bpm`, `max_hr_bpm`, `avg_hr_zone`, `avg_cadence_spm`, `rpe` | Effort |
+| `temp_c`, `feels_like_c`, `humidity_pct`, `cloud_cover_pct`, `wind_kmh`, `wind_gust_kmh`, `wind_from`, `precip_mm`, `conditions` | Open-Meteo weather averaged over the activity's hours |
+| `lap_count`, `splits_json`, `laps_json` | Per-km splits and watch laps as JSON arrays (runs) |
+| `synced_at_utc` | When this row was last written |
+
+Missing values are empty cells.
+
+### Run Card
+
+**Prerequisites**
+
+* macOS with Node 18 or later (`node --version`).
+* The Strava API application you already use for the web app (Client ID and Secret from
+  https://www.strava.com/settings/api). No changes to it are needed: Strava always allows
+  `localhost` as a callback.
+
+**One-time setup**
+
+```bash
+cd ~/run-journal && node sync/setup.js
+```
+
+Type the Client ID and Secret when asked (the Secret is hidden), approve on the Strava page that
+opens, and wait for "Connected as …".
+
+Then install the schedule:
+
+```bash
+cd ~/run-journal && ./sync/install-schedule.sh
+```
+
+**Run it by hand**
+
+```bash
+cd ~/run-journal && node sync/strava-sync.js
+```
+
+Or trigger the scheduled job immediately:
+
+```bash
+launchctl kickstart gui/$(id -u)/com.run-journal.strava-sync
+```
+
+**Pass checks**
+
+* The script prints a line starting `OK: added N, updated N, total N rows`.
+* `~/Documents/jarvis-inputs/strava/activities.csv` exists and its first line is the column header.
+* `launchctl print gui/$(id -u)/com.run-journal.strava-sync` shows the job, and after 09:15 or
+  21:15 the log has a fresh `OK:` line:
+
+```bash
+tail -n 5 ~/Library/Logs/run-journal-sync.log
+```
+
+**Top failure modes**
+
+| Symptom in the log | Cause | Fix |
+|---|---|---|
+| `AUTH: … Run: node sync/setup.js` | Strava retired the refresh token (for example a newer sign-in elsewhere) or access was revoked | Run `node sync/setup.js` again and choose to reuse the saved Client ID |
+| `PERMISSION: macOS blocked access …` | macOS privacy protection on `~/Documents` blocked the background job | System Settings > Privacy & Security > Files and Folders: allow `node` to access Documents, then kickstart the job |
+| `… left for next run` | Rate limit or the 40-per-run cap during a big backfill | Nothing: the next run continues. Or run by hand again after 15 minutes |
+| No new log lines at all | The Mac was shut down at both times, or `node` moved (for example after a Node upgrade to a new path) | Kickstart by hand; re-run `./sync/install-schedule.sh` after changing Node |
+| Web app says "sign-in needs renewing" | The sync's refresh retired the browser's token | Press "Save & connect to Strava" once on that device |
+
+**Remove it**
+
+```bash
+cd ~/run-journal && ./sync/install-schedule.sh uninstall
 ```
